@@ -76,7 +76,7 @@ int main(int argc, char *argv[]) //get port number
     if (n < 0){
         error("ERROR reading from socket");
     }
-    cout << "the message is" << buffer;
+    cout << "the message is; " << buffer;
 
     
 
