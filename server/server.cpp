@@ -1,84 +1,112 @@
-/* A simple server in the internet domain using TCP
-   The port number is passed as an argument */
 #include <iostream>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/types.h> 
+#include <string>
+#include <stdio.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-
+#include <arpa/inet.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <netdb.h>
+#include <sys/uio.h>
+#include <sys/time.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <fstream>
 using namespace std;
-
-//error message
-void error(const char *msg)
+//Server side
+int main(int argc, char *argv[])
 {
-    perror(msg);
-    exit(1);
-}
-
-int main(int argc, char *argv[]) //get port number
-{
-    int sockfd, newsockfd, portno;
-    socklen_t clilen;
-    int n;
-    /*
-        sockfd - file descriptor on server socket
-        newsockfd - file descriptor on client socket
-        portno - server port number
-        clilen - size client address
-        n - messages in and out
-    */
-    char buffer[256]; //reads from socket connection into buffer
-    struct sockaddr_in serv_addr, cli_addr; 
-    /*
-    struct definition:
-        struct sockaddr_in{
-            short   sin_family; // must be AF_INET 
-            u_short sin_port;
-            struct  in_addr sin_addr;
-            char    sin_zero[8]; // Not used, must be zero 
-        };
-    */
-
-    if (argc < 2) {//see if port is there
-        error("ERROR no port provided");
+    //for the server, we only need to specify a port number
+    if(argc != 2)
+    {
+        cerr << "Usage: port" << endl;
+        exit(0);
     }
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    //starts a socket, family is AF_INET, sock_stream is datatype, 0 makes it a protocol based on past arg, tcp for SOCK_STREAM, UDP for DATAGRAM
-    if (sockfd < 0) { //socket returns 0 if it works
-    error("ERROR opening socket");
+    //grab the port number
+    int port = atoi(argv[1]);
+    //buffer to send and receive messages with
+    char msg[1500];
+     
+    //setup a socket and connection tools
+    sockaddr_in servAddr;
+    bzero((char*)&servAddr, sizeof(servAddr));
+    servAddr.sin_family = AF_INET;
+    servAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    servAddr.sin_port = htons(port);
+ 
+    //open stream oriented socket with internet address
+    //also keep track of the socket descriptor
+    int serverSd = socket(AF_INET, SOCK_STREAM, 0);
+    if(serverSd < 0)
+    {
+        cerr << "Error establishing the server socket" << endl;
+        exit(0);
     }
-    bzero((char *) &serv_addr, sizeof(serv_addr)); 
-    //all values in serv_addr are set to 0
-
-    portno = atoi(argv[1]); //port is string of integers now its integer
-
-    serv_addr.sin_family = AF_INET; //internet instead of AF_UNIX for sharing files
-    serv_addr.sin_port = htons(portno);
-    //htons converts host byte order network byte order
-    serv_addr.sin_addr.s_addr = INADDR_ANY;//INADDR_ANY means ip addr in this 
-    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0){//binds socket to ip
-        error("ERROR on binding");
+    //bind the socket to its local address
+    int bindStatus = bind(serverSd, (struct sockaddr*) &servAddr, 
+        sizeof(servAddr));
+    if(bindStatus < 0)
+    {
+        cerr << "Error binding socket to local address" << endl;
+        exit(0);
     }
-
-    listen(sockfd, 5); //listen for conections
-    
-    clilen = sizeof(cli_addr);
-    newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
-    //accepts client connection
-    if (newsockfd < 0) {//checks for acception
-        error("ERROR on accept");
+    cout << "Waiting for a client to connect..." << endl;
+    //listen for up to 5 requests at a time
+    listen(serverSd, 5);
+    //receive a request from client using accept
+    //we need a new address to connect with the client
+    sockaddr_in newSockAddr;
+    socklen_t newSockAddrSize = sizeof(newSockAddr);
+    //accept, create a new socket descriptor to 
+    //handle the new connection with client
+    int newSd = accept(serverSd, (sockaddr *)&newSockAddr, &newSockAddrSize);
+    if(newSd < 0)
+    {
+        cerr << "Error accepting request from client!" << endl;
+        exit(1);
     }
-
-    bzero(buffer, 256); //buffer values set to zero
-    n = read(newsockfd, buffer, 255); //n set to messages
-    if (n < 0){
-        error("ERROR reading from socket");
+    cout << "Connected with client!" << endl;
+    //lets keep track of the session time
+    struct timeval start1, end1;
+    gettimeofday(&start1, NULL);
+    //also keep track of the amount of data sent as well
+    int bytesRead, bytesWritten = 0;
+    while(1)
+    {
+        //receive a message from the client (listen)
+        cout << "Awaiting client response..." << endl;
+        memset(&msg, 0, sizeof(msg));//clear the buffer
+        bytesRead += recv(newSd, (char*)&msg, sizeof(msg), 0);
+        if(!strcmp(msg, "exit"))
+        {
+            cout << "Client has quit the session" << endl;
+            break;
+        }
+        cout << "Client: " << msg << endl;
+        cout << ">";
+        string data;
+        getline(cin, data);
+        memset(&msg, 0, sizeof(msg)); //clear the buffer
+        strcpy(msg, data.c_str());
+        if(data == "exit")
+        {
+            //send to the client that server has closed the connection
+            send(newSd, (char*)&msg, strlen(msg), 0);
+            break;
+        }
+        //send the message to client
+        bytesWritten += send(newSd, (char*)&msg, strlen(msg), 0);
     }
-    cout << "the message is; " << buffer;
-
-    
-
-    return 0;
+    //we need to close the socket descriptors after we're all done
+    gettimeofday(&end1, NULL);
+    close(newSd);
+    close(serverSd);
+    cout << "********Session********" << endl;
+    cout << "Bytes written: " << bytesWritten << " Bytes read: " << bytesRead << endl;
+    cout << "Elapsed time: " << (end1.tv_sec - start1.tv_sec) 
+        << " secs" << endl;
+    cout << "Connection closed..." << endl;
+    return 0;   
 }
